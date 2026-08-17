@@ -1,0 +1,2 @@
+ALTER TABLE devis
+  ADD COLUMN taux_tva DECIMAL(5, 2) NOT NULL DEFAULT 0 AFTER statut;

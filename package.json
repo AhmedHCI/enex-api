@@ -1,0 +1,32 @@
+{
+  "name": "enex-api",
+  "version": "1.0.0",
+  "description": "API backend pour l'application de nettoyage de surfaces Enex",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop enex-api",
+    "pm2:restart": "pm2 restart enex-api",
+    "pm2:logs": "pm2 logs enex-api",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "joi": "^17.13.3",
+    "morgan": "^1.10.0",
+    "mysql2": "^3.23.3",
+    "pdfkit": "^0.19.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.55.0",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

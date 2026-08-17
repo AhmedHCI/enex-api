@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const db = require("../config/database");
 const { catchAsync, AppError } = require("../middleware/errorHandler");
@@ -7,7 +8,15 @@ const { buildPdfPayload } = require("../utils/pdfPayload");
 
 const documentsDir = path.join(__dirname, "..", "documents");
 
-async function attachDetails(factureRows) {
+function baseUrlFrom(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function signatureFilePath(id) {
+  return path.join(documentsDir, `signature-facture-${id}.png`);
+}
+
+async function attachDetails(factureRows, baseUrl) {
   if (!factureRows.length) return factureRows;
   const factureIds = factureRows.map((f) => f.id_facture);
 
@@ -46,6 +55,9 @@ async function attachDetails(factureRows) {
       ...facture,
       prestations: facturePrestations,
       ...computeDocumentTotals(totalHt, facture.taux_tva),
+      signature_url: facture.signed_at
+        ? `${baseUrl}/documents/signature-facture-${facture.id_facture}.png`
+        : null,
     };
   });
 }
@@ -70,12 +82,12 @@ const countSelect = baseSelect.replace(
    WHERE 1=1`
 );
 
-async function fetchFactureById(id) {
+async function fetchFactureById(id, baseUrl) {
   const [factures] = await db.query(`${baseSelect} AND f.id_facture = ?`, [id]);
   if (!factures.length) {
     throw new AppError("Facture non trouvée", 404, "FACTURE_NOT_FOUND");
   }
-  const [withDetails] = await attachDetails(factures);
+  const [withDetails] = await attachDetails(factures, baseUrl);
   return withDetails;
 }
 
@@ -108,7 +120,7 @@ const facturesController = {
     params.push(Number(limit), offset);
 
     const [factures] = await db.query(query, params);
-    const withDetails = await attachDetails(factures);
+    const withDetails = await attachDetails(factures, baseUrlFrom(req));
 
     res.json({
       factures: withDetails,
@@ -123,14 +135,14 @@ const facturesController = {
 
   // Récupérer une facture par ID
   getById: catchAsync(async (req, res) => {
-    const facture = await fetchFactureById(req.params.id);
+    const facture = await fetchFactureById(req.params.id, baseUrlFrom(req));
     res.json(facture);
   }),
 
   // Générer (ou régénérer) le PDF de la facture et renvoyer son URL
   generatePdf: catchAsync(async (req, res) => {
     const { id } = req.params;
-    const facture = await fetchFactureById(id);
+    const facture = await fetchFactureById(id, baseUrlFrom(req));
     const [societeRows] = await db.query("SELECT * FROM societe ORDER BY id_societe ASC LIMIT 1");
 
     const payload = buildPdfPayload(facture, {
@@ -138,6 +150,10 @@ const facturesController = {
       numero: facture.id_facture,
       date: facture.date_facture,
     });
+    const signaturePath = signatureFilePath(id);
+    if (facture.signed_at && fs.existsSync(signaturePath)) {
+      payload.signatureImagePath = signaturePath;
+    }
 
     const filename = `facture-${id}.pdf`;
     const filePath = path.join(documentsDir, filename);

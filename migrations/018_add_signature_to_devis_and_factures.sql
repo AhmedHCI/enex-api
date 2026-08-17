@@ -1,0 +1,2 @@
+ALTER TABLE devis ADD COLUMN signed_at DATETIME NULL AFTER taux_tva;
+ALTER TABLE factures ADD COLUMN signed_at DATETIME NULL AFTER taux_tva;

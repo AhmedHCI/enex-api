@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const Joi = require("joi");
 const db = require("../config/database");
@@ -8,6 +9,14 @@ const { buildPdfPayload } = require("../utils/pdfPayload");
 const { fetchFactureById } = require("./factures.controller");
 
 const documentsDir = path.join(__dirname, "..", "documents");
+
+function baseUrlFrom(req) {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+function signatureFilePath(id) {
+  return path.join(documentsDir, `signature-devis-${id}.png`);
+}
 
 const devisSupportSchema = Joi.object({
   id_support: Joi.number().integer().required(),
@@ -76,7 +85,7 @@ async function insertPrestations(connection, idDevis, prestations) {
   }
 }
 
-async function attachDetails(devisRows) {
+async function attachDetails(devisRows, baseUrl) {
   if (!devisRows.length) return devisRows;
   const devisIds = devisRows.map((d) => d.id_devis);
 
@@ -115,6 +124,7 @@ async function attachDetails(devisRows) {
       ...devis,
       prestations: devisPrestations,
       ...computeDocumentTotals(totalHt, devis.taux_tva),
+      signature_url: devis.signed_at ? `${baseUrl}/documents/signature-devis-${devis.id_devis}.png` : null,
     };
   });
 }
@@ -139,12 +149,12 @@ const countSelect = baseSelect.replace(
    WHERE 1=1`
 );
 
-async function fetchDevisById(id) {
+async function fetchDevisById(id, baseUrl) {
   const [devis] = await db.query(`${baseSelect} AND d.id_devis = ?`, [id]);
   if (!devis.length) {
     throw new AppError("Devis non trouvé", 404, "DEVIS_NOT_FOUND");
   }
-  const [withDetails] = await attachDetails(devis);
+  const [withDetails] = await attachDetails(devis, baseUrl);
   return withDetails;
 }
 
@@ -177,7 +187,7 @@ const devisController = {
     params.push(Number(limit), offset);
 
     const [devis] = await db.query(query, params);
-    const withDetails = await attachDetails(devis);
+    const withDetails = await attachDetails(devis, baseUrlFrom(req));
 
     res.json({
       devis: withDetails,
@@ -192,17 +202,21 @@ const devisController = {
 
   // Récupérer un devis par ID
   getById: catchAsync(async (req, res) => {
-    const devis = await fetchDevisById(req.params.id);
+    const devis = await fetchDevisById(req.params.id, baseUrlFrom(req));
     res.json(devis);
   }),
 
   // Générer (ou régénérer) le PDF du devis et renvoyer son URL
   generatePdf: catchAsync(async (req, res) => {
     const { id } = req.params;
-    const devis = await fetchDevisById(id);
+    const devis = await fetchDevisById(id, baseUrlFrom(req));
     const [societeRows] = await db.query("SELECT * FROM societe ORDER BY id_societe ASC LIMIT 1");
 
     const payload = buildPdfPayload(devis, { label: "Devis", numero: devis.id_devis, date: devis.date_devis });
+    const signaturePath = signatureFilePath(id);
+    if (devis.signed_at && fs.existsSync(signaturePath)) {
+      payload.signatureImagePath = signaturePath;
+    }
 
     const filename = `devis-${id}.pdf`;
     const filePath = path.join(documentsDir, filename);
@@ -212,7 +226,7 @@ const devisController = {
     res.json({ url });
   }),
 
-  // Marquer le devis comme validé (accepté par le client)
+  // Marquer le devis comme validé (accepté par le client), sans signature
   validate: catchAsync(async (req, res) => {
     const { id } = req.params;
 
@@ -229,13 +243,43 @@ const devisController = {
       id,
     ]);
 
-    res.json(await fetchDevisById(id));
+    res.json(await fetchDevisById(id, baseUrlFrom(req)));
+  }),
+
+  // Enregistre la signature manuscrite du client : valide le devis dans la foulée.
+  sign: catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const { image } = req.body;
+
+    if (!image || typeof image !== "string") {
+      throw new AppError("Signature manquante", 400, "SIGNATURE_REQUIRED");
+    }
+
+    const [existing] = await db.query("SELECT statut FROM devis WHERE id_devis = ?", [id]);
+    if (!existing.length) {
+      throw new AppError("Devis non trouvé", 404, "DEVIS_NOT_FOUND");
+    }
+    if (existing[0].statut === "facture") {
+      throw new AppError("Ce devis a déjà été transformé en facture", 400, "DEVIS_ALREADY_INVOICED");
+    }
+
+    const base64 = image.replace(/^data:image\/\w+;base64,/, "");
+    fs.writeFileSync(signatureFilePath(id), Buffer.from(base64, "base64"));
+
+    const now = new Date();
+    await db.query("UPDATE devis SET statut = 'valide', signed_at = ?, updated_at = ? WHERE id_devis = ?", [
+      now,
+      now,
+      id,
+    ]);
+
+    res.json(await fetchDevisById(id, baseUrlFrom(req)));
   }),
 
   // Transformer le devis validé en facture (copie figée des prestations/supports)
   convertToFacture: catchAsync(async (req, res) => {
     const { id } = req.params;
-    const devis = await fetchDevisById(id);
+    const devis = await fetchDevisById(id, baseUrlFrom(req));
 
     if (devis.statut !== "valide") {
       throw new AppError(
@@ -250,10 +294,15 @@ const devisController = {
       await connection.beginTransaction();
 
       const [result] = await connection.query(
-        "INSERT INTO factures (id_devis, id_chantier, date_facture, taux_tva, notes) VALUES (?, ?, ?, ?, ?)",
-        [devis.id_devis, devis.id_chantier, new Date(), devis.taux_tva, devis.notes ?? null]
+        "INSERT INTO factures (id_devis, id_chantier, date_facture, taux_tva, signed_at, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        [devis.id_devis, devis.id_chantier, new Date(), devis.taux_tva, devis.signed_at ?? null, devis.notes ?? null]
       );
       const idFacture = result.insertId;
+
+      const devisSignaturePath = signatureFilePath(id);
+      if (devis.signed_at && fs.existsSync(devisSignaturePath)) {
+        fs.copyFileSync(devisSignaturePath, path.join(documentsDir, `signature-facture-${idFacture}.png`));
+      }
 
       for (const prestation of devis.prestations) {
         const [prestationResult] = await connection.query(
@@ -280,7 +329,7 @@ const devisController = {
 
       await connection.commit();
 
-      res.status(201).json(await fetchFactureById(idFacture));
+      res.status(201).json(await fetchFactureById(idFacture, baseUrlFrom(req)));
     } catch (err) {
       await connection.rollback();
       throw err;
@@ -313,7 +362,7 @@ const devisController = {
       await connection.commit();
 
       const [devis] = await db.query(`${baseSelect} AND d.id_devis = ?`, [idDevis]);
-      const [withDetails] = await attachDetails(devis);
+      const [withDetails] = await attachDetails(devis, baseUrlFrom(req));
       res.status(201).json(withDetails);
     } catch (err) {
       await connection.rollback();
@@ -353,7 +402,7 @@ const devisController = {
       await connection.commit();
 
       const [devis] = await db.query(`${baseSelect} AND d.id_devis = ?`, [id]);
-      const [withDetails] = await attachDetails(devis);
+      const [withDetails] = await attachDetails(devis, baseUrlFrom(req));
       res.json(withDetails);
     } catch (err) {
       await connection.rollback();

@@ -156,8 +156,8 @@ function generateDocumentPdf(payload, societe, filePath) {
       doc.moveDown(1.5);
       doc.fontSize(10).fillColor("#333").text("Signature du client :", { align: "right" });
       doc.moveDown(0.3);
-      doc.image(payload.signatureImagePath, doc.page.width - doc.page.margins.right - 150, doc.y, {
-        width: 150,
+      doc.image(payload.signatureImagePath, doc.page.width - doc.page.margins.right - 90, doc.y, {
+        width: 90,
       });
     }
 

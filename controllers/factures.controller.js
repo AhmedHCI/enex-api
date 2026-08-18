@@ -65,6 +65,7 @@ async function attachDetails(factureRows, baseUrl) {
 const baseSelect = `
   SELECT f.*,
     ch.adresse AS chantier_adresse, ch.cp AS chantier_cp, ch.ville AS chantier_ville,
+    ch.date_rdv AS chantier_date_rdv,
     cl.id_client, cl.nom AS client_nom, cl.prenom AS client_prenom, cl.nom_societe AS client_nom_societe,
     cl.adresse AS client_adresse, cl.cp AS client_cp, cl.ville AS client_ville,
     cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email

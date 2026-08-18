@@ -5,6 +5,15 @@ const PDFDocument = require("pdfkit");
 const logoPath = path.join(__dirname, "..", "assets", "logo.png");
 
 function formatDate(value) {
+  // Si c'est déjà une chaîne "YYYY-MM-DD", on la découpe directement pour éviter
+  // un aller-retour par un objet Date qui décalerait le jour selon le fuseau horaire.
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day] = match;
+      return `${day}/${month}/${year}`;
+    }
+  }
   const d = new Date(value);
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
 }

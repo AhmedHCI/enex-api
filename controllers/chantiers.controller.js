@@ -11,7 +11,9 @@ const chantierSchema = Joi.object({
   ville: Joi.string().max(100).allow("", null),
   type_habitation: Joi.string().valid(...TYPES_HABITATION).required(),
   surface_chantier: Joi.number().min(0).allow(null),
-  date_rdv: Joi.date().iso().allow(null),
+  // Chaîne brute (pas Joi.date()) pour éviter une conversion en Date JS qui,
+  // reformatée dans le fuseau horaire du serveur, peut décaler le jour de -1.
+  date_rdv: Joi.string().isoDate().allow(null),
 });
 
 const chantierUpdateSchema = chantierSchema.fork(

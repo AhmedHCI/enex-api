@@ -34,7 +34,9 @@ const devisPrestationSchema = Joi.object({
 
 const devisSchema = Joi.object({
   id_chantier: Joi.number().integer().required(),
-  date_devis: Joi.date().iso().required(),
+  // Chaîne brute (pas Joi.date()) pour éviter une conversion en Date JS qui,
+  // reformatée dans le fuseau horaire du serveur, peut décaler le jour de -1.
+  date_devis: Joi.string().isoDate().required(),
   taux_tva: Joi.number().min(0).max(100),
   notes: Joi.string().allow("", null),
   prestations: Joi.array().items(devisPrestationSchema).min(1).required(),

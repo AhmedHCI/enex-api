@@ -11,6 +11,7 @@ const chantierSchema = Joi.object({
   ville: Joi.string().max(100).allow("", null),
   type_habitation: Joi.string().valid(...TYPES_HABITATION).required(),
   surface_chantier: Joi.number().min(0).allow(null),
+  date_rdv: Joi.date().iso().allow(null),
 });
 
 const chantierUpdateSchema = chantierSchema.fork(

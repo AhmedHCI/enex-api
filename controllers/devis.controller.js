@@ -124,7 +124,9 @@ async function attachDetails(devisRows, baseUrl) {
       ...devis,
       prestations: devisPrestations,
       ...computeDocumentTotals(totalHt, devis.taux_tva),
-      signature_url: devis.signed_at ? `${baseUrl}/documents/signature-devis-${devis.id_devis}.png` : null,
+      signature_url: devis.signed_at
+        ? `${baseUrl}/documents/signature-devis-${devis.id_devis}.png?t=${new Date(devis.signed_at).getTime()}`
+        : null,
     };
   });
 }

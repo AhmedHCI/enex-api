@@ -1,5 +1,8 @@
 const fs = require("fs");
+const path = require("path");
 const PDFDocument = require("pdfkit");
+
+const logoPath = path.join(__dirname, "..", "assets", "logo.png");
 
 function formatDate(value) {
   const d = new Date(value);
@@ -48,6 +51,13 @@ function generateDocumentPdf(payload, societe, filePath) {
     doc.pipe(stream);
     stream.on("finish", () => resolve(filePath));
     stream.on("error", reject);
+
+    // Logo en haut à droite du courrier
+    if (fs.existsSync(logoPath)) {
+      doc.image(logoPath, doc.page.width - doc.page.margins.right - 60, doc.page.margins.top, {
+        width: 60,
+      });
+    }
 
     // En-tête société (letterhead)
     if (societe) {
@@ -134,6 +144,12 @@ function generateDocumentPdf(payload, societe, filePath) {
       doc.moveDown();
       doc.fontSize(12).fillColor("#000").text("Notes", { underline: true });
       doc.fontSize(10).fillColor("#333").text(payload.notes);
+    }
+
+    if (societe && societe.conditions_vente) {
+      doc.moveDown();
+      doc.fontSize(10).fillColor("#000").text("Conditions de vente", { underline: true });
+      doc.fontSize(8).fillColor("#555").text(societe.conditions_vente);
     }
 
     if (payload.signatureImagePath) {

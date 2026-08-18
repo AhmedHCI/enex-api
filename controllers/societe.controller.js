@@ -16,6 +16,7 @@ const societeSchema = Joi.object({
   marge: Joi.number().min(0).allow(null),
   jours_travail: Joi.number().integer().min(0).max(7).allow(null),
   activite: Joi.string().max(255).allow("", null),
+  conditions_vente: Joi.string().allow("", null),
 });
 
 const societeController = {

@@ -14,6 +14,7 @@ const handleJoiValidationError = (err) => ({
   status: "fail",
   statusCode: 400,
   message: "Validation Error",
+  isOperational: true,
   details: err.details.map((detail) => ({
     field: detail.context.key,
     message: detail.message,

@@ -34,9 +34,9 @@ const devisPrestationSchema = Joi.object({
 
 const devisSchema = Joi.object({
   id_chantier: Joi.number().integer().required(),
-  // Chaîne brute (pas Joi.date()) pour éviter une conversion en Date JS qui,
-  // reformatée dans le fuseau horaire du serveur, peut décaler le jour de -1.
-  date_devis: Joi.string().isoDate().required(),
+  // Chaîne brute au format YYYY-MM-DD (ni Joi.date(), ni .isoDate() : les deux
+  // reformatent la valeur, ce qui décale le jour ou casse l'insertion MySQL DATE).
+  date_devis: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   taux_tva: Joi.number().min(0).max(100),
   notes: Joi.string().allow("", null),
   prestations: Joi.array().items(devisPrestationSchema).min(1).required(),

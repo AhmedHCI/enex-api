@@ -11,9 +11,9 @@ const chantierSchema = Joi.object({
   ville: Joi.string().max(100).allow("", null),
   type_habitation: Joi.string().valid(...TYPES_HABITATION).required(),
   surface_chantier: Joi.number().min(0).allow(null),
-  // Chaîne brute (pas Joi.date()) pour éviter une conversion en Date JS qui,
-  // reformatée dans le fuseau horaire du serveur, peut décaler le jour de -1.
-  date_rdv: Joi.string().isoDate().allow(null),
+  // Chaîne brute au format YYYY-MM-DD (ni Joi.date(), ni .isoDate() : les deux
+  // reformatent la valeur, ce qui décale le jour ou casse l'insertion MySQL DATE).
+  date_rdv: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).allow(null),
 });
 
 const chantierUpdateSchema = chantierSchema.fork(

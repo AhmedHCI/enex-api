@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const db = require("../config/database");
 const { catchAsync, AppError } = require("../middleware/errorHandler");
@@ -10,10 +9,6 @@ const documentsDir = path.join(__dirname, "..", "documents");
 
 function baseUrlFrom(req) {
   return `${req.protocol}://${req.get("host")}`;
-}
-
-function signatureFilePath(id) {
-  return path.join(documentsDir, `signature-facture-${id}.png`);
 }
 
 async function attachDetails(factureRows, baseUrl) {
@@ -193,10 +188,7 @@ const facturesController = {
       numero: facture.id_facture,
       date: facture.date_facture,
     });
-    const signaturePath = signatureFilePath(id);
-    if (facture.signed_at && fs.existsSync(signaturePath)) {
-      payload.signatureImagePath = signaturePath;
-    }
+    // La signature client n'est affichée que sur le PDF du devis, pas sur la facture.
 
     const filename = `facture-${id}.pdf`;
     const filePath = path.join(documentsDir, filename);

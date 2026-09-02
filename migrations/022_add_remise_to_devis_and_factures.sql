@@ -1,0 +1,2 @@
+ALTER TABLE devis ADD COLUMN remise DECIMAL(5,2) NULL AFTER taux_tva;
+ALTER TABLE factures ADD COLUMN remise DECIMAL(5,2) NULL AFTER taux_tva;

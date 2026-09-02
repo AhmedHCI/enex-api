@@ -49,7 +49,7 @@ async function attachDetails(factureRows, baseUrl) {
     return {
       ...facture,
       prestations: facturePrestations,
-      ...computeDocumentTotals(totalHt, facture.taux_tva),
+      ...computeDocumentTotals(totalHt, facture.taux_tva, facture.remise),
       signature_url: facture.signed_at
         ? `${baseUrl}/documents/signature-facture-${facture.id_facture}.png`
         : null,

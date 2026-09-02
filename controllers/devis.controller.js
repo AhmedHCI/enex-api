@@ -38,6 +38,7 @@ const devisSchema = Joi.object({
   // reformatent la valeur, ce qui décale le jour ou casse l'insertion MySQL DATE).
   date_devis: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   taux_tva: Joi.number().min(0).max(100),
+  remise: Joi.number().min(0).max(100).allow(null),
   notes: Joi.string().allow("", null),
   prestations: Joi.array().items(devisPrestationSchema).min(1).required(),
 });
@@ -125,7 +126,7 @@ async function attachDetails(devisRows, baseUrl) {
     return {
       ...devis,
       prestations: devisPrestations,
-      ...computeDocumentTotals(totalHt, devis.taux_tva),
+      ...computeDocumentTotals(totalHt, devis.taux_tva, devis.remise),
       signature_url: devis.signed_at
         ? `${baseUrl}/documents/signature-devis-${devis.id_devis}.png?t=${new Date(devis.signed_at).getTime()}`
         : null,
@@ -341,8 +342,16 @@ const devisController = {
       await connection.beginTransaction();
 
       const [result] = await connection.query(
-        "INSERT INTO factures (id_devis, id_chantier, date_facture, taux_tva, signed_at, notes) VALUES (?, ?, ?, ?, ?, ?)",
-        [devis.id_devis, devis.id_chantier, new Date(), devis.taux_tva, devis.signed_at ?? null, devis.notes ?? null]
+        "INSERT INTO factures (id_devis, id_chantier, date_facture, taux_tva, remise, signed_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+          devis.id_devis,
+          devis.id_chantier,
+          new Date(),
+          devis.taux_tva,
+          devis.remise ?? null,
+          devis.signed_at ?? null,
+          devis.notes ?? null,
+        ]
       );
       const idFacture = result.insertId;
 

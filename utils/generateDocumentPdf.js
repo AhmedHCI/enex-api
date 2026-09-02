@@ -270,7 +270,7 @@ function drawTotalsAndReglement(doc, payload, societe) {
   const totalsX = doc.page.width - MARGIN - totalsWidth;
   const startY = doc.y + 10;
 
-  if (doc.page.height - startY < 140) {
+  if (doc.page.height - startY < 175) {
     doc.addPage();
     doc.y = MARGIN;
   }
@@ -283,6 +283,13 @@ function drawTotalsAndReglement(doc, payload, societe) {
   }
 
   let y = y0;
+  const hasRemise = payload.remise != null && Number(payload.remise) > 0;
+  if (hasRemise) {
+    totalLine("Sous-total HT :", formatEuro(payload.totalHtBrut), y, false);
+    y += 18;
+    totalLine(`Remise (${formatNumber(payload.remise)} %) :`, `-${formatEuro(payload.montantRemise)}`, y, false);
+    y += 18;
+  }
   totalLine("TOTAL HT :", formatEuro(payload.totalHt), y, false);
   y += 18;
   totalLine(`TVA (${formatNumber(payload.tauxTva)} %) :`, formatEuro(payload.montantTva), y, false);

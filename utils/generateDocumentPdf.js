@@ -51,13 +51,14 @@ function clientLine(client) {
 }
 
 function supportDims(support) {
-  if (support.longueur != null && support.largeur != null) {
-    return `${Number(support.longueur)} × ${Number(support.largeur)} m`;
-  }
-  if (support.superficie != null) {
-    return `${Number(support.superficie)} m²`;
-  }
-  return "—";
+  const base = support.longueur != null && support.largeur != null
+    ? `${Number(support.longueur)} × ${Number(support.largeur)} m`
+    : support.superficie != null
+    ? `${Number(support.superficie)} m²`
+    : null;
+  const hauteur = support.hauteur != null ? `H ${Number(support.hauteur)} m` : null;
+  const parts = [base, hauteur].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 // Décorations vertes en coin de page (haut-gauche discret, bas-droite en L).

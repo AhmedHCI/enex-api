@@ -17,6 +17,8 @@ const societeSchema = Joi.object({
   jours_travail: Joi.number().integer().min(0).max(7).allow(null),
   activite: Joi.string().max(255).allow("", null),
   conditions_vente: Joi.string().allow("", null),
+  banque: Joi.string().max(150).allow("", null),
+  iban: Joi.string().max(34).allow("", null),
 });
 
 const societeController = {

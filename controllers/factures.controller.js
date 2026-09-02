@@ -92,31 +92,45 @@ async function fetchFactureById(id, baseUrl) {
   return withDetails;
 }
 
+// Ajoute les filtres communs (chantier, recherche, période) à une requête + ses params.
+function applyFilters(query, params, { id_chantier, search, date_debut, date_fin }) {
+  if (id_chantier) {
+    query += " AND f.id_chantier = ?";
+    params.push(id_chantier);
+  }
+
+  if (search) {
+    query += " AND (cl.nom LIKE ? OR cl.nom_societe LIKE ? OR ch.adresse LIKE ? OR ch.ville LIKE ?)";
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  if (date_debut) {
+    query += " AND f.date_facture >= ?";
+    params.push(date_debut);
+  }
+
+  if (date_fin) {
+    query += " AND f.date_facture <= ?";
+    params.push(date_fin);
+  }
+
+  return query;
+}
+
 const facturesController = {
-  // Récupérer toutes les factures (recherche + pagination + filtre chantier)
+  // Récupérer toutes les factures (recherche + pagination + filtre chantier + période)
   getAll: catchAsync(async (req, res) => {
-    const { search, id_chantier, page = 1, limit = 20 } = req.query;
+    const { search, id_chantier, date_debut, date_fin, page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
+    const filters = { id_chantier, search, date_debut, date_fin };
 
-    let query = baseSelect;
-    let countQuery = countSelect;
-    const params = [];
-
-    if (id_chantier) {
-      query += " AND f.id_chantier = ?";
-      countQuery += " AND f.id_chantier = ?";
-      params.push(id_chantier);
-    }
-
-    if (search) {
-      query += " AND (cl.nom LIKE ? OR cl.nom_societe LIKE ? OR ch.adresse LIKE ? OR ch.ville LIKE ?)";
-      countQuery += " AND (cl.nom LIKE ? OR cl.nom_societe LIKE ? OR ch.adresse LIKE ? OR ch.ville LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    }
-
-    const [countResult] = await db.query(countQuery, params);
+    const countParams = [];
+    const countQuery = applyFilters(countSelect, countParams, filters);
+    const [countResult] = await db.query(countQuery, countParams);
     const total = countResult[0].total;
 
+    const params = [];
+    let query = applyFilters(baseSelect, params, filters);
     query += " ORDER BY f.date_facture DESC, f.id_facture DESC LIMIT ? OFFSET ?";
     params.push(Number(limit), offset);
 
@@ -131,6 +145,34 @@ const facturesController = {
         limit: Number(limit),
         totalPages: Math.ceil(total / limit),
       },
+    });
+  }),
+
+  // Récapitulatif du chiffre d'affaires (recherche + filtre chantier + période, sans pagination)
+  getTotals: catchAsync(async (req, res) => {
+    const { search, id_chantier, date_debut, date_fin } = req.query;
+    const filters = { id_chantier, search, date_debut, date_fin };
+
+    const params = [];
+    const query = applyFilters(baseSelect, params, filters);
+
+    const [factures] = await db.query(query, params);
+    const withDetails = await attachDetails(factures, baseUrlFrom(req));
+
+    const totals = withDetails.reduce(
+      (acc, f) => ({
+        total_ht: acc.total_ht + (f.total_ht ?? 0),
+        montant_tva: acc.montant_tva + (f.montant_tva ?? 0),
+        total_ttc: acc.total_ttc + (f.total_ttc ?? 0),
+      }),
+      { total_ht: 0, montant_tva: 0, total_ttc: 0 }
+    );
+
+    res.json({
+      count: withDetails.length,
+      total_ht: Number(totals.total_ht.toFixed(2)),
+      montant_tva: Number(totals.montant_tva.toFixed(2)),
+      total_ttc: Number(totals.total_ttc.toFixed(2)),
     });
   }),
 

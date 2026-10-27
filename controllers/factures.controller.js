@@ -74,6 +74,7 @@ const baseSelect = `
     cl.adresse AS client_adresse, cl.cp AS client_cp, cl.ville AS client_ville,
     cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email,
     ap.nom AS apporteur_nom, ap.prenom AS apporteur_prenom, ap.nom_societe AS apporteur_nom_societe,
+    ap.commission AS apporteur_commission,
     (SELECT COUNT(*) FROM reglements r WHERE r.id_facture = f.id_facture) AS nombre_reglements,
     (SELECT COALESCE(SUM(r.montant), 0) FROM reglements r WHERE r.id_facture = f.id_facture) AS montant_regle
   FROM factures f
@@ -178,12 +179,21 @@ const facturesController = {
     const withDetails = await attachDetails(factures, baseUrlFrom(req));
 
     const totals = withDetails.reduce(
-      (acc, f) => ({
-        total_ht: acc.total_ht + (f.total_ht ?? 0),
-        montant_tva: acc.montant_tva + (f.montant_tva ?? 0),
-        total_ttc: acc.total_ttc + (f.total_ttc ?? 0),
-      }),
-      { total_ht: 0, montant_tva: 0, total_ttc: 0 }
+      (acc, f) => {
+        // Commission de l'apporteur d'affaires assigné à la facture (% du total TTC),
+        // ignorée si aucun apporteur n'est affecté.
+        const commission =
+          f.apporteur_commission != null
+            ? ((f.total_ttc ?? 0) * Number(f.apporteur_commission)) / 100
+            : 0;
+        return {
+          total_ht: acc.total_ht + (f.total_ht ?? 0),
+          montant_tva: acc.montant_tva + (f.montant_tva ?? 0),
+          total_ttc: acc.total_ttc + (f.total_ttc ?? 0),
+          total_commissions: acc.total_commissions + commission,
+        };
+      },
+      { total_ht: 0, montant_tva: 0, total_ttc: 0, total_commissions: 0 }
     );
 
     res.json({
@@ -191,6 +201,7 @@ const facturesController = {
       total_ht: Number(totals.total_ht.toFixed(2)),
       montant_tva: Number(totals.montant_tva.toFixed(2)),
       total_ttc: Number(totals.total_ttc.toFixed(2)),
+      total_commissions: Number(totals.total_commissions.toFixed(2)),
     });
   }),
 

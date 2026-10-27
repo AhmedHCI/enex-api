@@ -34,13 +34,19 @@ const devisPrestationSchema = Joi.object({
 
 const devisSchema = Joi.object({
   id_chantier: Joi.number().integer().required(),
+  id_apporteur: Joi.number().integer().allow(null),
   // Chaîne brute au format YYYY-MM-DD (ni Joi.date(), ni .isoDate() : les deux
   // reformatent la valeur, ce qui décale le jour ou casse l'insertion MySQL DATE).
   date_devis: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   taux_tva: Joi.number().min(0).max(100),
   remise: Joi.number().min(0).max(100).allow(null),
   notes: Joi.string().allow("", null),
-  prestations: Joi.array().items(devisPrestationSchema).min(1).required(),
+  prestations: Joi.array()
+    .items(devisPrestationSchema)
+    .min(1)
+    .unique("id_prestation")
+    .required()
+    .messages({ "array.unique": "Une même prestation ne peut pas être ajoutée deux fois." }),
 });
 
 const devisUpdateSchema = devisSchema.fork(
@@ -140,10 +146,12 @@ const baseSelect = `
     ch.date_rdv AS chantier_date_rdv,
     cl.id_client, cl.nom AS client_nom, cl.prenom AS client_prenom, cl.nom_societe AS client_nom_societe,
     cl.adresse AS client_adresse, cl.cp AS client_cp, cl.ville AS client_ville,
-    cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email
+    cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email,
+    ap.nom AS apporteur_nom, ap.prenom AS apporteur_prenom, ap.nom_societe AS apporteur_nom_societe
   FROM devis d
   JOIN chantiers ch ON ch.id_chantier = d.id_chantier
   JOIN clients cl ON cl.id_client = ch.id_client
+  LEFT JOIN apporteurs_affaires ap ON ap.id_apporteur = d.id_apporteur
   WHERE 1=1
 `;
 const countSelect = baseSelect.replace(
@@ -152,6 +160,7 @@ const countSelect = baseSelect.replace(
    FROM devis d
    JOIN chantiers ch ON ch.id_chantier = d.id_chantier
    JOIN clients cl ON cl.id_client = ch.id_client
+   LEFT JOIN apporteurs_affaires ap ON ap.id_apporteur = d.id_apporteur
    WHERE 1=1`
 );
 
@@ -164,11 +173,16 @@ async function fetchDevisById(id, baseUrl) {
   return withDetails;
 }
 
-// Ajoute les filtres communs (chantier, recherche, période) à une requête + ses params.
-function applyFilters(query, params, { id_chantier, search, date_debut, date_fin }) {
+// Ajoute les filtres communs (chantier, apporteur, recherche, période) à une requête + ses params.
+function applyFilters(query, params, { id_chantier, id_apporteur, search, date_debut, date_fin }) {
   if (id_chantier) {
     query += " AND d.id_chantier = ?";
     params.push(id_chantier);
+  }
+
+  if (id_apporteur) {
+    query += " AND d.id_apporteur = ?";
+    params.push(id_apporteur);
   }
 
   if (search) {
@@ -192,9 +206,9 @@ function applyFilters(query, params, { id_chantier, search, date_debut, date_fin
 const devisController = {
   // Récupérer tous les devis (recherche + pagination + filtre chantier + période)
   getAll: catchAsync(async (req, res) => {
-    const { search, id_chantier, date_debut, date_fin, page = 1, limit = 20 } = req.query;
+    const { search, id_chantier, id_apporteur, date_debut, date_fin, page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    const filters = { id_chantier, search, date_debut, date_fin };
+    const filters = { id_chantier, id_apporteur, search, date_debut, date_fin };
 
     const countParams = [];
     const countQuery = applyFilters(countSelect, countParams, filters);
@@ -222,8 +236,8 @@ const devisController = {
 
   // Récapitulatif du montant total (recherche + filtre chantier + période, sans pagination)
   getTotals: catchAsync(async (req, res) => {
-    const { search, id_chantier, date_debut, date_fin } = req.query;
-    const filters = { id_chantier, search, date_debut, date_fin };
+    const { search, id_chantier, id_apporteur, date_debut, date_fin } = req.query;
+    const filters = { id_chantier, id_apporteur, search, date_debut, date_fin };
 
     const params = [];
     const query = applyFilters(baseSelect, params, filters);
@@ -342,10 +356,11 @@ const devisController = {
       await connection.beginTransaction();
 
       const [result] = await connection.query(
-        "INSERT INTO factures (id_devis, id_chantier, date_facture, taux_tva, remise, signed_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO factures (id_devis, id_chantier, id_apporteur, date_facture, taux_tva, remise, signed_at, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
           devis.id_devis,
           devis.id_chantier,
+          devis.id_apporteur ?? null,
           new Date(),
           devis.taux_tva,
           devis.remise ?? null,

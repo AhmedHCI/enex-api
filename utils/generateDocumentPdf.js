@@ -171,6 +171,19 @@ function drawParties(doc, payload, societe) {
     doc.font("Helvetica").fontSize(9).fillColor(GREY_TEXT).text(lieu);
     doc.moveDown(0.8);
   }
+
+  // L'apporteur d'affaires n'est mentionné que sur la facture, pas sur le devis.
+  if (payload.label === "Facture" && payload.apporteur) {
+    const nomApporteur = [payload.apporteur.prenom, payload.apporteur.nom].filter(Boolean).join(" ");
+    const apporteurLabel = payload.apporteur.nomSociete
+      ? [nomApporteur, payload.apporteur.nomSociete].filter(Boolean).join(" — ")
+      : nomApporteur;
+    if (apporteurLabel) {
+      doc.font("Helvetica-Bold").fontSize(10).fillColor(GREEN_DARK).text("APPORTEUR D'AFFAIRES", leftX);
+      doc.font("Helvetica").fontSize(9).fillColor(GREY_TEXT).text(apporteurLabel);
+      doc.moveDown(0.8);
+    }
+  }
 }
 
 // Aplatit prestations/supports en lignes de tableau (Description / PU / Quantité / Total).
@@ -303,7 +316,37 @@ function drawTotalsAndReglement(doc, payload, societe) {
   y += 8;
   totalLine("TOTAL TTC :", formatEuro(payload.totalTtc), y, true);
 
-  if (societe && (societe.banque || societe.iban)) {
+  // Mention du solde uniquement sur la facture, et seulement si au moins un
+  // règlement a été enregistré (sinon le solde == total TTC, redondant).
+  const isFacture = payload.label === "Facture";
+  const hasReglements = isFacture && payload.reglements && payload.reglements.length > 0;
+  if (hasReglements) {
+    const solde = Number(payload.solde ?? payload.totalTtc);
+    y += 20;
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(payload.estReglee ? GREEN_DARK : "#B8860B");
+    doc.text("Solde à payer :", totalsX, y, { width: totalsWidth * 0.5, align: "right" });
+    doc.text(formatEuro(solde), totalsX + totalsWidth * 0.5 + 8, y, { width: totalsWidth * 0.5 - 8, align: "right" });
+  }
+
+  const MODE_LABELS = { cheque: "Chèque", especes: "Espèces", virement: "Virement" };
+
+  if (hasReglements) {
+    let ry = y0;
+    doc.font("Helvetica-Bold").fontSize(10).fillColor(GREEN_DARK).text("RÈGLEMENT REÇU", MARGIN, ry, { width: reglementWidth });
+    ry = doc.y + 4;
+    doc.font("Helvetica").fontSize(9).fillColor(GREY_TEXT);
+    payload.reglements.forEach((r) => {
+      const modeLabel = MODE_LABELS[r.mode_reglement] || r.mode_reglement;
+      const chequeSuffix = r.mode_reglement === "cheque" && r.numero_cheque ? ` n°${r.numero_cheque}` : "";
+      doc.text(
+        `${formatDate(r.date_reglement)} — ${modeLabel}${chequeSuffix} — ${formatEuro(r.montant)}`,
+        MARGIN,
+        ry,
+        { width: reglementWidth }
+      );
+      ry = doc.y;
+    });
+  } else if (societe && (societe.banque || societe.iban)) {
     let ry = y0;
     doc.font("Helvetica-Bold").fontSize(10).fillColor(GREEN_DARK).text("RÈGLEMENT", MARGIN, ry, { width: reglementWidth });
     ry = doc.y + 4;

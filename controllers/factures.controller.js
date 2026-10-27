@@ -1,4 +1,5 @@
 const path = require("path");
+const Joi = require("joi");
 const db = require("../config/database");
 const { catchAsync, AppError } = require("../middleware/errorHandler");
 const { computeTotal, computeDocumentTotals } = require("../utils/lineTotals");
@@ -46,13 +47,21 @@ async function attachDetails(factureRows, baseUrl) {
   return factureRows.map((facture) => {
     const facturePrestations = prestations.filter((p) => p.id_facture === facture.id_facture);
     const totalHt = facturePrestations.reduce((sum, p) => sum + p.sous_total, 0);
+    const totals = computeDocumentTotals(totalHt, facture.taux_tva, facture.remise);
+    const montantRegle = Number(facture.montant_regle);
+    // Réglée seulement si le cumul des règlements couvre le total TTC (pas juste
+    // "il existe un règlement") : un acompte partiel laisse un solde à payer.
+    const estReglee = totals.total_ttc > 0 && montantRegle >= totals.total_ttc - 0.01;
     return {
       ...facture,
       prestations: facturePrestations,
-      ...computeDocumentTotals(totalHt, facture.taux_tva, facture.remise),
+      ...totals,
       signature_url: facture.signed_at
         ? `${baseUrl}/documents/signature-facture-${facture.id_facture}.png`
         : null,
+      est_reglee: estReglee,
+      montant_regle: montantRegle,
+      solde: Number((totals.total_ttc - montantRegle).toFixed(2)),
     };
   });
 }
@@ -63,10 +72,14 @@ const baseSelect = `
     ch.date_rdv AS chantier_date_rdv,
     cl.id_client, cl.nom AS client_nom, cl.prenom AS client_prenom, cl.nom_societe AS client_nom_societe,
     cl.adresse AS client_adresse, cl.cp AS client_cp, cl.ville AS client_ville,
-    cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email
+    cl.telephone AS client_telephone, cl.portable AS client_portable, cl.email AS client_email,
+    ap.nom AS apporteur_nom, ap.prenom AS apporteur_prenom, ap.nom_societe AS apporteur_nom_societe,
+    (SELECT COUNT(*) FROM reglements r WHERE r.id_facture = f.id_facture) AS nombre_reglements,
+    (SELECT COALESCE(SUM(r.montant), 0) FROM reglements r WHERE r.id_facture = f.id_facture) AS montant_regle
   FROM factures f
   JOIN chantiers ch ON ch.id_chantier = f.id_chantier
   JOIN clients cl ON cl.id_client = ch.id_client
+  LEFT JOIN apporteurs_affaires ap ON ap.id_apporteur = f.id_apporteur
   WHERE 1=1
 `;
 const countSelect = baseSelect.replace(
@@ -75,8 +88,13 @@ const countSelect = baseSelect.replace(
    FROM factures f
    JOIN chantiers ch ON ch.id_chantier = f.id_chantier
    JOIN clients cl ON cl.id_client = ch.id_client
+   LEFT JOIN apporteurs_affaires ap ON ap.id_apporteur = f.id_apporteur
    WHERE 1=1`
 );
+
+const assignApporteurSchema = Joi.object({
+  id_apporteur: Joi.number().integer().allow(null).required(),
+});
 
 async function fetchFactureById(id, baseUrl) {
   const [factures] = await db.query(`${baseSelect} AND f.id_facture = ?`, [id]);
@@ -87,11 +105,16 @@ async function fetchFactureById(id, baseUrl) {
   return withDetails;
 }
 
-// Ajoute les filtres communs (chantier, recherche, période) à une requête + ses params.
-function applyFilters(query, params, { id_chantier, search, date_debut, date_fin }) {
+// Ajoute les filtres communs (chantier, apporteur, recherche, période) à une requête + ses params.
+function applyFilters(query, params, { id_chantier, id_apporteur, search, date_debut, date_fin }) {
   if (id_chantier) {
     query += " AND f.id_chantier = ?";
     params.push(id_chantier);
+  }
+
+  if (id_apporteur) {
+    query += " AND f.id_apporteur = ?";
+    params.push(id_apporteur);
   }
 
   if (search) {
@@ -115,9 +138,9 @@ function applyFilters(query, params, { id_chantier, search, date_debut, date_fin
 const facturesController = {
   // Récupérer toutes les factures (recherche + pagination + filtre chantier + période)
   getAll: catchAsync(async (req, res) => {
-    const { search, id_chantier, date_debut, date_fin, page = 1, limit = 20 } = req.query;
+    const { search, id_chantier, id_apporteur, date_debut, date_fin, page = 1, limit = 20 } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
-    const filters = { id_chantier, search, date_debut, date_fin };
+    const filters = { id_chantier, id_apporteur, search, date_debut, date_fin };
 
     const countParams = [];
     const countQuery = applyFilters(countSelect, countParams, filters);
@@ -145,8 +168,8 @@ const facturesController = {
 
   // Récapitulatif du chiffre d'affaires (recherche + filtre chantier + période, sans pagination)
   getTotals: catchAsync(async (req, res) => {
-    const { search, id_chantier, date_debut, date_fin } = req.query;
-    const filters = { id_chantier, search, date_debut, date_fin };
+    const { search, id_chantier, id_apporteur, date_debut, date_fin } = req.query;
+    const filters = { id_chantier, id_apporteur, search, date_debut, date_fin };
 
     const params = [];
     const query = applyFilters(baseSelect, params, filters);
@@ -182,12 +205,19 @@ const facturesController = {
     const { id } = req.params;
     const facture = await fetchFactureById(id, baseUrlFrom(req));
     const [societeRows] = await db.query("SELECT * FROM societe ORDER BY id_societe ASC LIMIT 1");
+    const [reglements] = await db.query(
+      "SELECT date_reglement, mode_reglement, numero_cheque, montant FROM reglements WHERE id_facture = ? ORDER BY date_reglement ASC",
+      [id]
+    );
 
-    const payload = buildPdfPayload(facture, {
-      label: "Facture",
-      numero: facture.id_facture,
-      date: facture.date_facture,
-    });
+    const payload = buildPdfPayload(
+      { ...facture, reglements },
+      {
+        label: "Facture",
+        numero: facture.id_facture,
+        date: facture.date_facture,
+      }
+    );
     // La signature client n'est affichée que sur le PDF du devis, pas sur la facture.
 
     const filename = `facture-${id}.pdf`;
@@ -196,6 +226,33 @@ const facturesController = {
 
     const url = `${req.protocol}://${req.get("host")}/documents/${filename}`;
     res.json({ url });
+  }),
+
+  // Affecter (ou retirer) l'apporteur d'affaires d'une facture
+  assignApporteur: catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const { error, value } = assignApporteurSchema.validate(req.body);
+    if (error) throw error;
+
+    const current = await fetchFactureById(id, baseUrlFrom(req)).catch(() => null);
+    if (!current) {
+      throw new AppError("Facture non trouvée", 404, "FACTURE_NOT_FOUND");
+    }
+    if (current.est_reglee) {
+      throw new AppError(
+        "Facture déjà réglée : l'apporteur d'affaires ne peut plus être modifié",
+        400,
+        "FACTURE_ALREADY_SETTLED"
+      );
+    }
+
+    await db.query("UPDATE factures SET id_apporteur = ?, updated_at = ? WHERE id_facture = ?", [
+      value.id_apporteur,
+      new Date(),
+      id,
+    ]);
+
+    res.json(await fetchFactureById(id, baseUrlFrom(req)));
   }),
 
   // Supprimer une facture

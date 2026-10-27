@@ -14,6 +14,17 @@ function buildPdfPayload(record, { label, numero, date }) {
     tauxTva: record.taux_tva,
     montantTva: record.montant_tva,
     totalTtc: record.total_ttc,
+    apporteur:
+      record.apporteur_nom || record.apporteur_nom_societe
+        ? {
+            nom: record.apporteur_nom,
+            prenom: record.apporteur_prenom,
+            nomSociete: record.apporteur_nom_societe,
+          }
+        : null,
+    estReglee: record.est_reglee || false,
+    solde: record.solde,
+    reglements: record.reglements || [],
     chantier: {
       adresse: record.chantier_adresse,
       cp: record.chantier_cp,
